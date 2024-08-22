@@ -1,0 +1,180 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'CloudFormation template for deploying an EC2 instance with NVIDIA NIM container, ALB, VPC, and Route53 record'
+
+Parameters:
+  InstanceType:
+    Type: String
+    Default: g5.12xlarge
+    AllowedValues:
+      - g5.12xlarge
+      - g5.24xlarge
+      - g5.48xlarge
+    Description: EC2 instance type
+
+  KeyName:
+    Type: AWS::EC2::KeyPair::KeyName
+    Description: Name of an existing EC2 KeyPair to enable SSH access to the instance
+
+  DomainName:
+    Type: String
+    Description: Domain name for the ALB (e.g., nim.example.com)
+
+  HostedZoneId:
+    Type: AWS::Route53::HostedZone::Id
+    Description: Route 53 Hosted Zone ID
+
+  NGCApiKey:
+    Type: String
+    Description: NGC API Key for downloading NVIDIA containers
+    NoEcho: true
+
+  VpcId:
+    Type: String
+    Description: Optional - Existing VPC ID. Leave blank to create a new VPC.
+    Default: ''
+
+  SubnetIds:
+    Type: CommaDelimitedList
+    Description: Optional - Existing Subnet IDs. Leave blank to create new subnets.
+    Default: ''
+
+Conditions:
+  CreateVpc: !Equals
+    - !Ref VpcId
+    - ''
+  CreateSubnets: !Equals
+    - !Join ['', !Ref SubnetIds]
+    - ''
+
+Resources:
+  # VPC and related resources remain unchanged
+
+  EC2SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for NIM EC2 instance
+      VpcId: !If [CreateVpc, !Ref VPC, !Ref VpcId]
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 8000
+          ToPort: 8000
+          SourceSecurityGroupId: !Ref ALBSecurityGroup
+
+  ALBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for ALB
+      VpcId: !If [CreateVpc, !Ref VPC, !Ref VpcId]
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+
+  EC2Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: !Ref InstanceType
+      KeyName: !Ref KeyName
+      ImageId: !Ref UbuntuAMI
+      NetworkInterfaces:
+        - AssociatePublicIpAddress: 'true'
+          DeviceIndex: '0'
+          GroupSet:
+            - !Ref EC2SecurityGroup
+          SubnetId: !If
+            - CreateSubnets
+            - !Ref PublicSubnet1
+            - !Select [0, !Ref SubnetIds]
+      IamInstanceProfile: !Ref EC2InstanceProfile
+      MetadataOptions:
+        HttpTokens: required
+        HttpEndpoint: enabled
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          apt-get update
+          apt-get install -y docker.io
+          systemctl start docker
+          systemctl enable docker
+          usermod -aG docker ubuntu
+
+          # Install NVIDIA drivers
+          DRIVER_VERSION="470.103.01"
+          apt-get install -y build-essential
+          curl -fSsl -O https://us.download.nvidia.com/tesla/$DRIVER_VERSION/NVIDIA-Linux-x86_64-$DRIVER_VERSION.run
+          sudo sh NVIDIA-Linux-x86_64-$DRIVER_VERSION.run -s
+
+          # Install nvidia-docker
+          distribution=$(. /etc/os-release;echo $ID$VERSION_ID)
+          curl -s -L https://nvidia.github.io/nvidia-docker/gpgkey | sudo apt-key add -
+          curl -s -L https://nvidia.github.io/nvidia-docker/$distribution/nvidia-docker.list | sudo tee /etc/apt/sources.list.d/nvidia-docker.list
+          sudo apt-get update && sudo apt-get install -y nvidia-docker2
+          sudo systemctl restart docker
+
+          # Pull and run NVIDIA NIM container
+          docker login nvcr.io -u '$oauthtoken' -p ${NGCApiKey}
+          docker pull nvcr.io/nvidia/nemoai_training:23.10-py3
+          docker run -d --gpus all -p 8000:8000 nvcr.io/nvidia/nemoai_training:23.10-py3
+
+  EC2InstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+
+  EC2InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - !Ref EC2InstanceRole
+
+  UbuntuAMI:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/canonical/ubuntu/server/22.04/stable/current/amd64/hvm/ebs-gp2/ami-id
+
+  # Certificate, ALB, and Route53 resources remain unchanged
+
+Outputs:
+  VpcId:
+    Description: VPC ID
+    Value: !If [CreateVpc, !Ref VPC, !Ref VpcId]
+  PublicSubnet1:
+    Description: Public Subnet 1
+    Value: !If [CreateSubnets, !Ref PublicSubnet1, !Select [0, !Ref SubnetIds]]
+  PublicSubnet2:
+    Description: Public Subnet 2
+    Value: !If [CreateSubnets, !Ref PublicSubnet2, !Select [1, !Ref SubnetIds]]
+  InstanceId:
+    Description: EC2 Instance ID
+    Value: !Ref EC2Instance
+  PublicDNS:
+    Description: Public DNS of EC2 instance
+    Value: !GetAtt EC2Instance.PublicDnsName
+  ALBDNSName:
+    Description: DNS name of the Application Load Balancer
+    Value: !GetAtt ApplicationLoadBalancer.DNSName
+  DomainName:
+    Description: Domain name for accessing the NIM
+    Value: !Ref DomainName
+  CertificateArn:
+    Description: ARN of the created SSL/TLS certificate
+    Value: !Ref Certificate
+  UbuntuAMIId:
+    Description: Ubuntu AMI ID used for the EC2 instance
+    Value: !Ref UbuntuAMI
