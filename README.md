@@ -1,4 +1,4 @@
-# NIM EC2 Deployment
+# Deploying an NVIDIA NIM to EC2
 
 This demo will show you how to deploy an [NVIDIA NIM](https://www.nvidia.com/en-us/ai/) to an Amazon EC2 instance and enable it for inference.
 
@@ -223,3 +223,25 @@ The UserData script in the Launch Template performs several key setup tasks:
 6. **Health Checks**
    - The ALB periodically sends health check requests to the `/health` endpoint
    - The NIM container responds to these health checks, allowing the ALB to determine if the instance is healthy
+
+```
+## Instance Types and Costs
+
+This CloudFormation template supports the following instance types for NVIDIA AI Microservices (NIM):
+
+### G5 Instances
+- g5.xlarge: 1 GPU, 4 vCPUs, 16 GB RAM
+- g5.2xlarge: 1 GPU, 8 vCPUs, 32 GB RAM
+- g5.4xlarge: 1 GPU, 16 vCPUs, 64 GB RAM
+- g5.8xlarge: 1 GPU, 32 vCPUs, 128 GB RAM
+- g5.16xlarge: 1 GPU, 64 vCPUs, 256 GB RAM
+- g5.12xlarge: 4 GPUs, 48 vCPUs, 192 GB RAM
+- g5.24xlarge: 4 GPUs, 96 vCPUs, 384 GB RAM
+- g5.48xlarge: 8 GPUs, 192 vCPUs, 768 GB RAM
+
+
+⚠️ **Warning**: These instances can be very expensive to run. Please check the current AWS pricing for your region before deploying. For example, as of 2023, the costs for G5 instances in the US East (N. Virginia) region range from $1.006/hour for g5.xlarge to $16.288/hour for g5.48xlarge.
+
+Always remember to stop or terminate your instances when not in use to avoid unnecessary charges.
+
+```

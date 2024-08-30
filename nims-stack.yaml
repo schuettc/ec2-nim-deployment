@@ -5,7 +5,16 @@ Parameters:
   InstanceType:
     Type: String
     Default: g5.12xlarge
-    Description: EC2 instance type
+    Description: EC2 instance type for NIM
+    AllowedValues:
+      - g5.xlarge
+      - g5.2xlarge
+      - g5.4xlarge
+      - g5.8xlarge
+      - g5.16xlarge
+      - g5.12xlarge
+      - g5.24xlarge
+      - g5.48xlarge
 
   KeyName:
     Type: AWS::EC2::KeyPair::KeyName

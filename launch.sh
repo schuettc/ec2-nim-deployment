@@ -54,6 +54,49 @@ done
 VPC_ID=${VPC_ID:-""}
 SUBNET_IDS=${SUBNET_IDS:-""}
 
+# Function to check if the stack exists
+stack_exists() {
+    aws cloudformation describe-stacks --stack-name "$STACK_NAME" --region "$AWS_REGION" --no-cli-pager >/dev/null 2>&1
+}
+
+# Function to create or update the CloudFormation stack
+create_or_update_stack() {
+    if stack_exists; then
+        log_message "Stack '$STACK_NAME' already exists. Attempting to update..."
+        update_stack
+    else
+        log_message "Stack '$STACK_NAME' does not exist. Attempting to create..."
+        create_stack
+    fi
+}
+
+# Function to update the CloudFormation stack
+update_stack() {
+    aws cloudformation update-stack \
+        --stack-name "$STACK_NAME" \
+        --region "$AWS_REGION" \
+        --template-body "file://$TEMPLATE_FILE" \
+        --parameters \
+            ParameterKey=InstanceType,ParameterValue="$INSTANCE_TYPE" \
+            ParameterKey=KeyName,ParameterValue="$KEY_NAME" \
+            ParameterKey=DomainName,ParameterValue="$DOMAIN_NAME" \
+            ParameterKey=HostedZoneId,ParameterValue="$HOSTED_ZONE_ID" \
+            ParameterKey=VpcId,ParameterValue="$VPC_ID" \
+            ParameterKey=SubnetIds,ParameterValue="$SUBNET_IDS" \
+            ParameterKey=Repository,ParameterValue="$REPOSITORY" \
+            ParameterKey=LatestTag,ParameterValue="$LATEST_TAG" \
+            ParameterKey=NGCApiKeySecretName,ParameterValue="$NGC_API_KEY_SECRET_NAME" \
+        --capabilities CAPABILITY_IAM \
+        --no-cli-pager
+
+    if [ $? -eq 0 ]; then
+        log_message "Stack update initiated successfully"
+    else
+        log_error "Failed to update stack"
+        exit 1
+    fi
+}
+
 # Function to create the CloudFormation stack
 create_stack() {
     log_message "Attempting to create CloudFormation stack..."
@@ -83,15 +126,17 @@ create_stack() {
     fi
 }
 
-# Call the function to create the stack
-log_message "Calling create_stack function..."
-create_stack
+# Replace the call to create_stack with create_or_update_stack
+log_message "Calling create_or_update_stack function..."
+create_or_update_stack
 
-log_message "Waiting for stack creation to complete..."
-if aws cloudformation wait stack-create-complete --stack-name "$STACK_NAME" --region "$AWS_REGION" --no-cli-pager; then
-    log_message "Stack creation completed successfully"
+# Update the wait command to handle both create and update
+log_message "Waiting for stack operation to complete..."
+if aws cloudformation wait stack-update-complete --stack-name "$STACK_NAME" --region "$AWS_REGION" --no-cli-pager || \
+   aws cloudformation wait stack-create-complete --stack-name "$STACK_NAME" --region "$AWS_REGION" --no-cli-pager; then
+    log_message "Stack operation completed successfully"
 else
-    log_error "Stack creation failed or timed out"
+    log_error "Stack operation failed or timed out"
     exit 1
 fi
 
