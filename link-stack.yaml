@@ -1,0 +1,26 @@
+Parameters:
+  ALBTargetGroupArn:
+    Type: String
+  ALBSecurityGroupId:
+    Type: AWS::EC2::SecurityGroup::Id
+  EC2SecurityGroupId:
+    Type: AWS::EC2::SecurityGroup::Id
+
+Resources:
+  ALBToEC2SecurityGroupIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref EC2SecurityGroupId
+      IpProtocol: tcp
+      FromPort: 8000
+      ToPort: 8000
+      SourceSecurityGroupId: !Ref ALBSecurityGroupId
+
+  EC2ToALBSecurityGroupEgress:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !Ref ALBSecurityGroupId
+      IpProtocol: tcp
+      FromPort: 8000
+      ToPort: 8000
+      DestinationSecurityGroupId: !Ref EC2SecurityGroupId

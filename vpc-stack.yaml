@@ -1,0 +1,139 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'VPC and Subnet configuration for NIM'
+
+Parameters:
+  CreateVpc:
+    Type: String
+    AllowedValues: ['true', 'false']
+  CreateSubnets:
+    Type: String
+    AllowedValues: ['true', 'false']
+  VpcId:
+    Type: String
+    Default: 'NONE'
+  SubnetIds:
+    Type: String
+    Default: 'NONE'
+
+Conditions:
+  ShouldCreateVpc: !Equals [!Ref CreateVpc, 'true']
+  ShouldCreateSubnets: !Equals [!Ref CreateSubnets, 'true']
+
+Resources:
+  VPC:
+    Type: AWS::EC2::VPC
+    Condition: ShouldCreateVpc
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      InstanceTenancy: default
+      Tags:
+        - Key: Name
+          Value: NIM-VPC
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Condition: ShouldCreateVpc
+    Properties:
+      Tags:
+        - Key: Name
+          Value: NIM-IGW
+
+  AttachGateway:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Condition: ShouldCreateVpc
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+
+  PublicSubnet0:
+    Type: AWS::EC2::Subnet
+    Condition: ShouldCreateSubnets
+    Properties:
+      VpcId: !If [ShouldCreateVpc, !Ref VPC, !Ref VpcId]
+      AvailabilityZone: !Select [0, !GetAZs '']
+      CidrBlock: 10.0.0.0/24
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: NIM-Public-Subnet-0
+
+  PublicSubnet1:
+    Type: AWS::EC2::Subnet
+    Condition: ShouldCreateSubnets
+    Properties:
+      VpcId: !If [ShouldCreateVpc, !Ref VPC, !Ref VpcId]
+      AvailabilityZone: !Select [1, !GetAZs '']
+      CidrBlock: 10.0.1.0/24
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: NIM-Public-Subnet-1
+
+  PublicSubnet2:
+    Type: AWS::EC2::Subnet
+    Condition: ShouldCreateSubnets
+    Properties:
+      VpcId: !If [ShouldCreateVpc, !Ref VPC, !Ref VpcId]
+      AvailabilityZone: !Select [2, !GetAZs '']
+      CidrBlock: 10.0.2.0/24
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: NIM-Public-Subnet-2
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Condition: ShouldCreateVpc
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: NIM-Public-RouteTable
+
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: AttachGateway
+    Condition: ShouldCreateVpc
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  PublicSubnet0RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Condition: ShouldCreateSubnets
+    Properties:
+      SubnetId: !Ref PublicSubnet0
+      RouteTableId: !If [ShouldCreateVpc, !Ref PublicRouteTable, !Ref VpcId]
+
+  PublicSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Condition: ShouldCreateSubnets
+    Properties:
+      SubnetId: !Ref PublicSubnet1
+      RouteTableId: !If [ShouldCreateVpc, !Ref PublicRouteTable, !Ref VpcId]
+
+  PublicSubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Condition: ShouldCreateSubnets
+    Properties:
+      SubnetId: !Ref PublicSubnet2
+      RouteTableId: !If [ShouldCreateVpc, !Ref PublicRouteTable, !Ref VpcId]
+
+Outputs:
+  VpcId:
+    Description: The ID of the VPC
+    Value: !If [ShouldCreateVpc, !Ref VPC, !Ref VpcId]
+    Export:
+      Name: !Sub "${AWS::StackName}-VpcId"
+  
+  SubnetIds:
+    Description: A list of the Subnet IDs
+    Value: !If 
+      - ShouldCreateSubnets
+      - !Join [',', [!Ref PublicSubnet0, !Ref PublicSubnet1, !Ref PublicSubnet2]]
+      - !Ref SubnetIds
+    Export:
+      Name: !Sub "${AWS::StackName}-SubnetIds"

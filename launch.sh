@@ -53,6 +53,37 @@ done
 # Set optional variables with default values
 VPC_ID=${VPC_ID:-""}
 SUBNET_IDS=${SUBNET_IDS:-""}
+CAPACITY_RESERVATION_ID=${CAPACITY_RESERVATION_ID:-""}
+PLACEMENT_GROUP_NAME=${PLACEMENT_GROUP_NAME:-""}
+
+# Get AWS account ID
+AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+
+# Generate S3 bucket name
+STACK_NAME_LOWER=$(echo "$STACK_NAME" | tr '[:upper:]' '[:lower:]')
+S3_BUCKET_NAME="cf-templates-${STACK_NAME_LOWER}-${AWS_ACCOUNT_ID}-${AWS_REGION}"
+log_message "Generated S3 bucket name: $S3_BUCKET_NAME"
+
+# Function to create S3 bucket if it doesn't exist
+create_s3_bucket() {
+    if aws s3 ls "s3://$S3_BUCKET_NAME" 2>&1 | grep -q 'NoSuchBucket'
+    then
+        log_message "Creating S3 bucket: $S3_BUCKET_NAME"
+        aws s3 mb "s3://$S3_BUCKET_NAME" --region "$AWS_REGION"
+    else
+        log_message "S3 bucket already exists: $S3_BUCKET_NAME"
+    fi
+}
+
+# Function to upload templates to S3
+upload_templates() {
+    log_message "Uploading templates to S3..."
+    aws s3 cp vpc-stack.yaml "s3://$S3_BUCKET_NAME/vpc-stack.yaml"
+    aws s3 cp ec2-stack.yaml "s3://$S3_BUCKET_NAME/ec2-stack.yaml"
+    aws s3 cp alb-stack.yaml "s3://$S3_BUCKET_NAME/alb-stack.yaml"
+    aws s3 cp link-stack.yaml s3://${S3_BUCKET_NAME}/link-stack.yaml  
+    log_message "Templates uploaded successfully"
+}
 
 # Function to check if the stack exists
 stack_exists() {
@@ -86,7 +117,10 @@ update_stack() {
             ParameterKey=Repository,ParameterValue="$REPOSITORY" \
             ParameterKey=LatestTag,ParameterValue="$LATEST_TAG" \
             ParameterKey=NGCApiKeySecretName,ParameterValue="$NGC_API_KEY_SECRET_NAME" \
-        --capabilities CAPABILITY_IAM \
+            ParameterKey=CapacityReservationId,ParameterValue="$CAPACITY_RESERVATION_ID" \
+            ParameterKey=S3BucketName,ParameterValue="$S3_BUCKET_NAME" \
+            ParameterKey=PlacementGroupName,ParameterValue="$PLACEMENT_GROUP_NAME" \
+        --capabilities CAPABILITY_IAM CAPABILITY_AUTO_EXPAND \
         --no-cli-pager
 
     if [ $? -eq 0 ]; then
@@ -103,7 +137,6 @@ create_stack() {
     aws cloudformation create-stack \
         --stack-name "$STACK_NAME" \
         --region "$AWS_REGION" \
-        --disable-rollback \
         --template-body "file://$TEMPLATE_FILE" \
         --parameters \
             ParameterKey=InstanceType,ParameterValue="$INSTANCE_TYPE" \
@@ -115,7 +148,10 @@ create_stack() {
             ParameterKey=Repository,ParameterValue="$REPOSITORY" \
             ParameterKey=LatestTag,ParameterValue="$LATEST_TAG" \
             ParameterKey=NGCApiKeySecretName,ParameterValue="$NGC_API_KEY_SECRET_NAME" \
-        --capabilities CAPABILITY_IAM \
+            ParameterKey=CapacityReservationId,ParameterValue="$CAPACITY_RESERVATION_ID" \
+            ParameterKey=S3BucketName,ParameterValue="$S3_BUCKET_NAME" \
+            ParameterKey=PlacementGroupName,ParameterValue="$PLACEMENT_GROUP_NAME" \
+        --capabilities CAPABILITY_IAM CAPABILITY_AUTO_EXPAND \
         --no-cli-pager
     
     if [ $? -eq 0 ]; then
@@ -126,11 +162,15 @@ create_stack() {
     fi
 }
 
-# Replace the call to create_stack with create_or_update_stack
+# Create S3 bucket and upload templates
+create_s3_bucket
+upload_templates
+
+# Call create_or_update_stack function
 log_message "Calling create_or_update_stack function..."
 create_or_update_stack
 
-# Update the wait command to handle both create and update
+# Wait for stack operation to complete
 log_message "Waiting for stack operation to complete..."
 if aws cloudformation wait stack-update-complete --stack-name "$STACK_NAME" --region "$AWS_REGION" --no-cli-pager || \
    aws cloudformation wait stack-create-complete --stack-name "$STACK_NAME" --region "$AWS_REGION" --no-cli-pager; then
